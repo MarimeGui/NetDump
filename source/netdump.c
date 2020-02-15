@@ -5,11 +5,13 @@
 #include <wiiuse/wpad.h>
 #include <di/di.h>
 #include <ogc/system.h>
-#include "cleanripimport.h"
+#include "cleanrip/main_exports.h"
+#include "cleanrip/gc_dvd_exports.h"
 
 #define PORT 9875
-#define MAGIC_NUMBER "NETDUMP"
 #define PROTOCOL_VERSION 1
+
+#define MAGIC_NUMBER "NETDUMP"
 
 #define DISCONNECT 0xFFFFFFFF
 #define EXIT_PROGRAM 0xFFFFFFFE
@@ -111,6 +113,21 @@ int main(int argc, char **argv) {
         return 0;
     }
 
+    s32 ios_version = IOS_GetVersion();
+    int ios_58_exists = find_ios(58);
+    if (ios_58_exists && (ios_version != 58)) {
+        printf(" failed.\n");
+        printf("IOS 58 exists but isn't in use.\n");
+        wait_for_button_exit();
+        return 0;
+    }
+    if (!ios_58_exists) {
+        printf(" failed.\n");
+        printf("IOS 58 does not exist.\n");
+        wait_for_button_exit();
+        return 0;
+    }
+
     printf(" OK.\n");
 
     printf("Configuring Network... ");
@@ -169,7 +186,7 @@ int main(int argc, char **argv) {
 
     // New clients loop
     while (1) {
-        printf("Waiting for clients.\n");
+        printf("Waiting for client.\n");
 
         csock = net_accept(sock, (struct sockaddr *) &client, &clientlen);
 
@@ -263,7 +280,11 @@ int main(int argc, char **argv) {
                 case DUMP_BCA:
                     printf("C  Dump BCA\n");
 
-                    // Code Here
+                    if (init_dvd() == NO_DISC) {
+                        printf("R  No Disc in Drive\n");
+                        int_to_buf(RETURN_NO_DISC_ERROR, send_buf, &send_index);
+                        break;
+                    }
 
                     break;
                 default:
