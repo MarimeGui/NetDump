@@ -12,6 +12,9 @@
 #define EXIT_PROGRAM 0xFFFFFFFE
 #define EJECT_DISC 1
 
+#define RETURN_PROTOCOL_ERROR 0xFFFFFFFF
+#define RETURN_NO_DISC_ERROR 0xFFFFFFFE
+#define RETURN_COULD_NOT_EJECT_ERROR 0xFFFFFFFD
 #define RETURN_OK 0
 
 static void *xfb = NULL;
@@ -25,8 +28,24 @@ void int_to_buf(int value, char *buf, int *index) {
     buf[(*index)++] = value & 0x000000FF;
 }
 
+// Reads int from buffer
 int buf_to_int(char *buf, int *index) {
     return (buf[(*index)++] << 24) | (buf[(*index)++] << 16) | (buf[(*index)++] << 8) | buf[(*index)++];
+}
+
+void buf_to_buf(char in_buf[], char *out_buf, int *index) {
+    int other_index = 0;
+    while (other_index < strlen(in_buf)) {
+        out_buf[*index] = in_buf[other_index];
+        (*index)++;
+        other_index++;
+    }
+}
+
+bool is_disc_in_drive() {
+    uint32_t val;
+    DI_GetCoverRegister(&val);
+    return (val & 2);
 }
 
 // Init various things
@@ -47,7 +66,6 @@ void *initialize() {
     return xfb;
 }
 
-
 int main(int argc, char **argv) {
     xfb = initialize();
 
@@ -56,19 +74,22 @@ int main(int argc, char **argv) {
     printf("Netdump\n");
     printf("Configuring Network... ");
     
+    // Init Network
     char localip[16] = {0};
     char gateway[16] = {0};
     char netmask[16] = {0};
     s32 ret = if_config(localip, netmask, gateway, TRUE, 20);
+
     if (ret>=0) {
         printf("successful. %s\n", localip);
 
+        // Mutable Values
         int sock, csock;
         int ret;
         u32 clientlen;
         struct sockaddr_in client;
         struct sockaddr_in server;
-        char temp[1026];
+        char recv_buf[1026];
         char send_buf[1026];
 
         clientlen = sizeof(client);
@@ -93,17 +114,21 @@ int main(int argc, char **argv) {
                             printf("Error connecting socket %d !\n", csock);
                             break;
                         }
+
                         printf("-> %s\n", inet_ntoa(client.sin_addr));
-                        memset(temp, 0, 1026);
-                        ret = net_recv (csock, temp, 1024, 0);
+
+                        memset(recv_buf, 0, 1026);
+                        ret = net_recv (csock, recv_buf, 1024, 0);
                         int index = 0;
+
                         if (ret < 15) {
                             printf("Packet too small !");
                             break;
                         }
+
                         bool correct = true;
                         for (; index < 7; index++) {
-                            if (temp[index] != MAGIC_NUMBER[index]) {
+                            if (recv_buf[index] != MAGIC_NUMBER[index]) {
                                 printf("Wrong Magic Number !\n");
                                 correct = false;
                                 break;
@@ -112,41 +137,59 @@ int main(int argc, char **argv) {
                         if (!correct) {
                             break;
                         }
-                        if (buf_to_int(temp, &index) != PROTOCOL_VERSION) {
+                        
+                        if (buf_to_int(recv_buf, &index) != PROTOCOL_VERSION) {
                             printf("Protol Version Mismatch !\n");
                             break;
                         }
                         bool exit = false;
-                        switch (buf_to_int(temp, &index)) {
+
+                        memset(send_buf, 0, 1026);
+                        int send_index = 0;
+
+                        buf_to_buf(MAGIC_NUMBER, send_buf, &send_index);
+                        int_to_buf(PROTOCOL_VERSION, send_buf, &send_index);
+
+                        switch (buf_to_int(recv_buf, &index)) {
                             case EXIT_PROGRAM:
-                                printf("Exiting Program\n");
+                                printf("C  Exit Program\n");
+
+                                int_to_buf(RETURN_OK, send_buf, &send_index);
+
                                 bypass_home_button = true;
                                 exit = true;
-                                memset(send_buf, 0, 1026);
-                                int send_index = 0;
-                                for (; send_index < strlen(MAGIC_NUMBER); send_index++) {
-                                    send_buf[send_index] = MAGIC_NUMBER[send_index];
-                                }
-                                int_to_buf(PROTOCOL_VERSION, send_buf, &send_index);
-                                int_to_buf(RETURN_OK, send_buf, &send_index);
-                                net_send(csock, send_buf, send_index, 0);
-                                net_close(csock);
+
                                 break;
                             case EJECT_DISC:
-                                printf("Ejecting disc\n");
-                                if (DI_Eject() == 0) {
-                                    printf("Ejected Properly\n");
-                                } else {
-                                    printf("Couldn't eject disc !\n");
+                                printf("C  Eject disc\n");
+
+                                if (!is_disc_in_drive()) {
+                                    printf("R  No Disc in Drive\n");
+                                    int_to_buf(RETURN_NO_DISC_ERROR, send_buf, &send_index);
+                                    break;
                                 }
+
+                                if (DI_Eject() == 0) {
+                                    int_to_buf(RETURN_OK, send_buf, &send_index);
+                                } else {
+                                    printf("R  Eject Failed\n");
+                                    int_to_buf(RETURN_COULD_NOT_EJECT_ERROR, send_buf, &send_index);
+                                }
+
                                 break;
                             default:
                                 printf("Unknown Command\n");
                         }
+
+                        net_send(csock, send_buf, send_index, 0);
+
                         printf("------------------\n");
+
                         if (exit) {
+                            net_close(csock);
                             break;
                         }
+
                     }
                 } else {
                     printf("Error %d while listening !", ret);
