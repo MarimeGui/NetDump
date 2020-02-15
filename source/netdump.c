@@ -5,6 +5,7 @@
 #include <wiiuse/wpad.h>
 #include <di/di.h>
 #include <ogc/system.h>
+#include "cleanripimport.h"
 
 #define PORT 9875
 #define MAGIC_NUMBER "NETDUMP"
@@ -101,9 +102,16 @@ int main(int argc, char **argv) {
     bool shutdown = false;
 
     printf("Netdump\n");
-    printf("Performing Checks...\n");
+    printf("Performing Checks...");
 
-    // Code Here
+    if (!have_ahbprot()) {
+        printf(" failed.\n");
+        printf("AHBPROT check failed.\n");
+        wait_for_button_exit();
+        return 0;
+    }
+
+    printf(" OK.\n");
 
     printf("Configuring Network... ");
     
@@ -161,6 +169,8 @@ int main(int argc, char **argv) {
 
     // New clients loop
     while (1) {
+        printf("Waiting for clients.\n");
+
         csock = net_accept(sock, (struct sockaddr *) &client, &clientlen);
 
         if (csock < 0) {
