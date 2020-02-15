@@ -30,6 +30,11 @@
 #define RETURN_BCA 2
 #define RETURN_GAME 3
 
+#define RED     "\x1b[31m"
+#define GREEN   "\x1b[32m"
+#define YELLOW  "\x1b[33m"
+#define WHITE   "\x1b[39m"
+
 static void *xfb = NULL;
 static GXRModeObj *rmode = NULL;
 
@@ -124,8 +129,8 @@ int main(int argc, char **argv) {
     printf("Performing Checks...");
 
     if (!have_ahbprot()) {
-        printf(" failed.\n");
-        printf("AHBPROT check failed.\n");
+        printf(RED " failed.\n");
+        printf("AHBPROT check failed.\n" WHITE);
         wait_for_button_exit();
         return 0;
     }
@@ -133,19 +138,19 @@ int main(int argc, char **argv) {
     s32 ios_version = IOS_GetVersion();
     int ios_58_exists = find_ios(58);
     if (ios_58_exists && (ios_version != 58)) {
-        printf(" failed.\n");
-        printf("IOS 58 exists but isn't in use.\n");
+        printf(RED " failed.\n");
+        printf("IOS 58 exists but isn't in use.\n" WHITE);
         wait_for_button_exit();
         return 0;
     }
     if (!ios_58_exists) {
-        printf(" failed.\n");
-        printf("IOS 58 does not exist.\n");
+        printf(RED " failed.\n");
+        printf("IOS 58 does not exist.\n" WHITE);
         wait_for_button_exit();
         return 0;
     }
 
-    printf(" OK.\n");
+    printf(GREEN " OK.\n" WHITE);
 
     printf("Configuring Network... ");
     
@@ -160,7 +165,7 @@ int main(int argc, char **argv) {
         return 0;
     }
     
-    printf("successful. Wii IP: %s\n", localip);
+    printf(GREEN "successful. " WHITE "Wii IP: %s\n", localip);
 
     // Mutable Values
     int sock, csock;
@@ -175,7 +180,7 @@ int main(int argc, char **argv) {
     sock = net_socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
 
     if (sock == INVALID_SOCKET) {
-        printf("Failed to open socket.\n");
+        printf(RED "Failed to open socket.\n" WHITE);
         wait_for_button_exit();
         return 0;
     }
@@ -188,13 +193,13 @@ int main(int argc, char **argv) {
     server.sin_addr.s_addr = INADDR_ANY;
 
     if (net_bind(sock, (struct sockaddr *) &server, sizeof(server))) {
-        printf("Error while binding socket.\n");
+        printf(RED "Error while binding socket.\n" WHITE);
         wait_for_button_exit();
         return 0;
     }
 
     if (net_listen(sock, 5)) {
-        printf("Error while listening.\n");
+        printf(RED "Error while listening.\n" WHITE);
         wait_for_button_exit();
         return 0;
     }
@@ -208,7 +213,7 @@ int main(int argc, char **argv) {
         csock = net_accept(sock, (struct sockaddr *) &client, &clientlen);
 
         if (csock < 0) {
-            printf("Error connecting to client.\n");
+            printf(RED "Error connecting to client.\n" WHITE);
             continue;
         }
 
@@ -229,17 +234,17 @@ int main(int argc, char **argv) {
             int_to_buf(PROTOCOL_VERSION, send_buf, &send_index);
 
             if (ret < 15) {
-                printf("Packet too small (%d) !\n", ret);
+                printf(RED "Packet too small (%d) !\n" WHITE, ret);
                 break;
             }
 
             if (!check_buf(MAGIC_NUMBER, recv_buf, &recv_index)) {
-                printf("Wrong Magic Number !\n");
+                printf(RED "Wrong Magic Number !\n" WHITE);
                 break;
             }
 
             if (buf_to_int(recv_buf, &recv_index) != PROTOCOL_VERSION) {
-                printf("Protol Version Mismatch !\n");
+                printf(RED "Protol Version Mismatch !\n" WHITE);
                 int_to_buf(RETURN_PROTOCOL_ERROR, send_buf, &send_index);
                 net_send(csock, send_buf, send_index, 0);
                 break;
@@ -280,16 +285,16 @@ int main(int argc, char **argv) {
                     printf("C  Eject disc\n");
 
                     if (!is_disc_in_drive()) {
-                        printf("R  No Disc in Drive\n");
+                        printf("R  " YELLOW "No Disc in Drive\n" WHITE);
                         int_to_buf(RETURN_NO_DISC_ERROR, send_buf, &send_index);
                         break;
                     }
 
                     if (DI_Eject() == 0) {
-                        printf("R  OK\n");
+                        printf("R  " GREEN "OK\n" WHITE);
                         int_to_buf(RETURN_OK, send_buf, &send_index);
                     } else {
-                        printf("R  Eject Failed\n");
+                        printf("R  " YELLOW "Eject Failed\n" WHITE);
                         int_to_buf(RETURN_COULD_NOT_EJECT_ERROR, send_buf, &send_index);
                     }
 
@@ -304,7 +309,7 @@ int main(int argc, char **argv) {
                     printf("C  Dump BCA\n");
 
                     if (init_dvd() == NO_DISC) {
-                        printf("R  No Disc in Drive\n");
+                        printf("R  " YELLOW "No Disc in Drive\n" WHITE);
                         int_to_buf(RETURN_NO_DISC_ERROR, send_buf, &send_index);
                         break;
                     }
@@ -312,7 +317,7 @@ int main(int argc, char **argv) {
                     int disc_type = identify_disc();
 
                     if (disc_type == IS_UNK_DISC) {
-                        printf("R  Unknown Disc Type\n");
+                        printf("R  " YELLOW "Unknown Disc Type\n" WHITE);
                         int_to_buf(RETURN_UNKNOWN_DISC_TYPE, send_buf, &send_index);
                         break;
                     }
@@ -326,11 +331,11 @@ int main(int argc, char **argv) {
                     memcpy(&send_buf[send_index], &bca_data[0], 64);
                     send_index += 64;
 
-                    printf("R  Sent BCA\n");
+                    printf("R  " GREEN "Sent BCA\n" WHITE);
 
                     break;
                 default:
-                    printf("C  Unknown Command\n");
+                    printf("C  " YELLOW "Unknown Command\n" WHITE);
 
                     int_to_buf(RETURN_PROTOCOL_ERROR, send_buf, &send_index);
             }
