@@ -117,6 +117,18 @@ u32 dvd_get_error(void) {
     return dvd[8];
 }
 
+void dvd_motor_off() {
+	dvd[0] = 0x2E;
+	dvd[1] = 0;
+	dvd[2] = 0xe3000000;
+	dvd[3] = 0;
+	dvd[4] = 0;
+	dvd[5] = 0;
+	dvd[6] = 0;
+	dvd[7] = 1; // IMM
+	while (dvd[7] & 1);
+}
+
 /*
  DVD_LowRead64(void* dst, unsigned int len, uint64_t offset)
  Read Raw, needs to be on sector boundaries

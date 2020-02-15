@@ -11,4 +11,5 @@ int init_dvd();
 int dvd_read_id();
 void dvd_read_bca(void* dst);
 u32 dvd_get_error(void);
+void dvd_motor_off();
 int DVD_LowRead64(void* dst, u32 len, uint64_t offset);
