@@ -9,6 +9,7 @@
 #define MAGIC_NUMBER "NETDUMP"
 #define PROTOCOL_VERSION 1
 
+#define DISCONNECT 0xFFFFFFFF
 #define EXIT_PROGRAM 0xFFFFFFFE
 #define EJECT_DISC 1
 
@@ -40,6 +41,15 @@ void buf_to_buf(char in_buf[], char *out_buf, int *index) {
         (*index)++;
         other_index++;
     }
+}
+
+bool check_buf(char ref_buf[], char *to_check, int *index) {
+    for (; *index < strlen(ref_buf); (*index)++) {
+        if (to_check[*index] != ref_buf[*index]) {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool is_disc_in_drive() {
@@ -107,86 +117,106 @@ int main(int argc, char **argv) {
 
             if (!ret) {
                 if (!(ret = net_listen(sock, 5))) {
+
+                    bool program_exit = false;
+
+                    // New clients loop
                     while (1) {
                         csock = net_accept(sock, (struct sockaddr *) &client, &clientlen);
 
                         if (csock < 0) {
                             printf("Error connecting socket %d !\n", csock);
-                            break;
+                            continue;
                         }
 
                         printf("-> %s\n", inet_ntoa(client.sin_addr));
 
-                        memset(recv_buf, 0, 1026);
-                        ret = net_recv (csock, recv_buf, 1024, 0);
-                        int index = 0;
+                        bool disconnect = false;
 
-                        if (ret < 15) {
-                            printf("Packet too small !");
-                            break;
-                        }
+                        // New command loop
+                        while (1) {
+                            memset(recv_buf, 0, 1026);
+                            ret = net_recv(csock, recv_buf, 1024, 0);
+                            int recv_index = 0;
 
-                        bool correct = true;
-                        for (; index < 7; index++) {
-                            if (recv_buf[index] != MAGIC_NUMBER[index]) {
+                            memset(send_buf, 0, 1026);
+                            int send_index = 0;
+
+                            buf_to_buf(MAGIC_NUMBER, send_buf, &send_index);
+                            int_to_buf(PROTOCOL_VERSION, send_buf, &send_index);
+
+                            if (ret < 15) {
+                                printf("Packet too small (%d) !\n", ret);
+                                break;
+                            }
+
+                            if (!check_buf(MAGIC_NUMBER, recv_buf, &recv_index)) {
                                 printf("Wrong Magic Number !\n");
-                                correct = false;
+                                break;
+                            }
+
+                            if (buf_to_int(recv_buf, &recv_index) != PROTOCOL_VERSION) {
+                                printf("Protol Version Mismatch !\n");
+                                int_to_buf(RETURN_PROTOCOL_ERROR, send_buf, &send_index);
+                                net_send(csock, send_buf, send_index, 0);
+                                break;
+                            }
+
+                            // Check command
+                            switch (buf_to_int(recv_buf, &recv_index)) {
+                                case DISCONNECT:
+                                    printf("C  Disconnect\n");
+
+                                    int_to_buf(RETURN_OK, send_buf, &send_index);
+
+                                    disconnect = true;
+                                    
+                                    break;
+                                case EXIT_PROGRAM:
+                                    printf("C  Exit Program\n");
+
+                                    int_to_buf(RETURN_OK, send_buf, &send_index);
+
+                                    bypass_home_button = true;
+                                    disconnect = true;
+                                    program_exit = true;
+
+                                    break;
+                                case EJECT_DISC:
+                                    printf("C  Eject disc\n");
+
+                                    if (!is_disc_in_drive()) {
+                                        printf("R  No Disc in Drive\n");
+                                        int_to_buf(RETURN_NO_DISC_ERROR, send_buf, &send_index);
+                                        break;
+                                    }
+
+                                    if (DI_Eject() == 0) {
+                                        printf("R  OK\n");
+                                        int_to_buf(RETURN_OK, send_buf, &send_index);
+                                    } else {
+                                        printf("R  Eject Failed\n");
+                                        int_to_buf(RETURN_COULD_NOT_EJECT_ERROR, send_buf, &send_index);
+                                    }
+
+                                    break;
+                                default:
+                                    printf("Unknown Command\n");
+                            }
+
+                            net_send(csock, send_buf, send_index, 0);
+
+                            if (disconnect) {
                                 break;
                             }
                         }
-                        if (!correct) {
-                            break;
-                        }
-                        
-                        if (buf_to_int(recv_buf, &index) != PROTOCOL_VERSION) {
-                            printf("Protol Version Mismatch !\n");
-                            break;
-                        }
-                        bool exit = false;
-
-                        memset(send_buf, 0, 1026);
-                        int send_index = 0;
-
-                        buf_to_buf(MAGIC_NUMBER, send_buf, &send_index);
-                        int_to_buf(PROTOCOL_VERSION, send_buf, &send_index);
-
-                        switch (buf_to_int(recv_buf, &index)) {
-                            case EXIT_PROGRAM:
-                                printf("C  Exit Program\n");
-
-                                int_to_buf(RETURN_OK, send_buf, &send_index);
-
-                                bypass_home_button = true;
-                                exit = true;
-
-                                break;
-                            case EJECT_DISC:
-                                printf("C  Eject disc\n");
-
-                                if (!is_disc_in_drive()) {
-                                    printf("R  No Disc in Drive\n");
-                                    int_to_buf(RETURN_NO_DISC_ERROR, send_buf, &send_index);
-                                    break;
-                                }
-
-                                if (DI_Eject() == 0) {
-                                    int_to_buf(RETURN_OK, send_buf, &send_index);
-                                } else {
-                                    printf("R  Eject Failed\n");
-                                    int_to_buf(RETURN_COULD_NOT_EJECT_ERROR, send_buf, &send_index);
-                                }
-
-                                break;
-                            default:
-                                printf("Unknown Command\n");
-                        }
-
-                        net_send(csock, send_buf, send_index, 0);
 
                         printf("------------------\n");
 
-                        if (exit) {
-                            net_close(csock);
+                        net_close(csock);
+
+                        if (program_exit) {
+                            net_close(sock);
                             break;
                         }
 
@@ -194,7 +224,6 @@ int main(int argc, char **argv) {
                 } else {
                     printf("Error %d while listening !", ret);
                 }
-                
             } else {
                 printf("Error %d while binding socket !\n", ret);
             }
