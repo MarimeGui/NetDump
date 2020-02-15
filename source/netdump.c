@@ -4,6 +4,7 @@
 #include <network.h>
 #include <wiiuse/wpad.h>
 #include <di/di.h>
+#include <ogc/system.h>
 
 #define PORT 9875
 #define MAGIC_NUMBER "NETDUMP"
@@ -11,12 +12,19 @@
 
 #define DISCONNECT 0xFFFFFFFF
 #define EXIT_PROGRAM 0xFFFFFFFE
+#define SHUTDOWN 0xFFFFFFFD
 #define EJECT_DISC 1
+#define DISC_INFO 2
+#define DUMP_BCA 3
+#define DUMP_GAME 4
 
 #define RETURN_PROTOCOL_ERROR 0xFFFFFFFF
 #define RETURN_NO_DISC_ERROR 0xFFFFFFFE
 #define RETURN_COULD_NOT_EJECT_ERROR 0xFFFFFFFD
 #define RETURN_OK 0
+#define RETURN_DISC_INFO 1
+#define RETURN_BCA 2
+#define RETURN_GAME 3
 
 static void *xfb = NULL;
 static GXRModeObj *rmode = NULL;
@@ -80,6 +88,7 @@ int main(int argc, char **argv) {
     xfb = initialize();
 
     bool bypass_home_button = false;
+    bool shutdown = false;
 
     printf("Netdump\n");
     printf("Configuring Network... ");
@@ -170,7 +179,7 @@ int main(int argc, char **argv) {
                                     int_to_buf(RETURN_OK, send_buf, &send_index);
 
                                     disconnect = true;
-                                    
+
                                     break;
                                 case EXIT_PROGRAM:
                                     printf("C  Exit Program\n");
@@ -180,6 +189,17 @@ int main(int argc, char **argv) {
                                     bypass_home_button = true;
                                     disconnect = true;
                                     program_exit = true;
+
+                                    break;
+                                case SHUTDOWN:
+                                    printf("C Shtudown\n");
+
+                                    int_to_buf(RETURN_OK, send_buf, &send_index);
+
+                                    bypass_home_button = true;
+                                    disconnect = true;
+                                    program_exit = true;
+                                    shutdown = true;
 
                                     break;
                                 case EJECT_DISC:
@@ -242,6 +262,10 @@ int main(int argc, char **argv) {
             if ( pressed & WPAD_BUTTON_HOME ) exit(0);
             VIDEO_WaitVSync();
         }
+    }
+
+    if (shutdown) {
+        SYS_ResetSystem(SYS_POWEROFF, 0, 0);
     }
 
     return 0;
