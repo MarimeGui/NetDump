@@ -17,6 +17,18 @@
 static void *xfb = NULL;
 static GXRModeObj *rmode = NULL;
 
+// Writes an int to a buffer
+void int_to_buf(int value, char *buf, int *index) {
+    buf[(*index)++] = (value & 0xFF000000) >> 24;
+    buf[(*index)++] = (value & 0x00FF0000) >> 16;
+    buf[(*index)++] = (value & 0x0000FF00) >> 8;
+    buf[(*index)++] = value & 0x000000FF;
+}
+
+int buf_to_int(char *buf, int *index) {
+    return (buf[(*index)++] << 24) | (buf[(*index)++] << 16) | (buf[(*index)++] << 8) | buf[(*index)++];
+}
+
 // Init various things
 void *initialize() {
     void *xfb;
@@ -85,7 +97,6 @@ int main(int argc, char **argv) {
                         memset(temp, 0, 1026);
                         ret = net_recv (csock, temp, 1024, 0);
                         int index = 0;
-                        printf("Received %d bytes\n", ret);
                         if (ret < 15) {
                             printf("Packet too small !");
                             break;
@@ -101,31 +112,23 @@ int main(int argc, char **argv) {
                         if (!correct) {
                             break;
                         }
-                        u32 protocol_v = (temp[index++] << 24) | (temp[index++] << 16) | (temp[index++] << 8) | temp[index++];
-                        if (protocol_v != PROTOCOL_VERSION) {
+                        if (buf_to_int(temp, &index) != PROTOCOL_VERSION) {
                             printf("Protol Version Mismatch !\n");
                             break;
                         }
-                        u32 command = (temp[index++] << 24) | (temp[index++] << 16) | (temp[index++] << 8) | temp[index++];
                         bool exit = false;
-                        switch (command) {
+                        switch (buf_to_int(temp, &index)) {
                             case EXIT_PROGRAM:
                                 printf("Exiting Program\n");
                                 bypass_home_button = true;
                                 exit = true;
-                                memset(send_buf, 2, 1026);
+                                memset(send_buf, 0, 1026);
                                 int send_index = 0;
                                 for (; send_index < strlen(MAGIC_NUMBER); send_index++) {
                                     send_buf[send_index] = MAGIC_NUMBER[send_index];
                                 }
-                                send_buf[send_index++] = (PROTOCOL_VERSION & 0xFF000000) >> 24;
-                                send_buf[send_index++] = (PROTOCOL_VERSION & 0x00FF0000) >> 16;
-                                send_buf[send_index++] = (PROTOCOL_VERSION & 0x0000FF00) >> 8;
-                                send_buf[send_index++] = PROTOCOL_VERSION & 0x000000FF;
-                                send_buf[send_index++] = (RETURN_OK & 0xFF000000) >> 24;
-                                send_buf[send_index++] = (RETURN_OK & 0x00FF0000) >> 16;
-                                send_buf[send_index++] = (RETURN_OK & 0x0000FF00) >> 8;
-                                send_buf[send_index++] = RETURN_OK & 0x000000FF;
+                                int_to_buf(PROTOCOL_VERSION, send_buf, &send_index);
+                                int_to_buf(RETURN_OK, send_buf, &send_index);
                                 net_send(csock, send_buf, send_index, 0);
                                 net_close(csock);
                                 break;
