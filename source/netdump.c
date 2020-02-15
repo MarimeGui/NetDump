@@ -24,6 +24,7 @@
 #define RETURN_PROTOCOL_ERROR 0xFFFFFFFF
 #define RETURN_NO_DISC_ERROR 0xFFFFFFFE
 #define RETURN_COULD_NOT_EJECT_ERROR 0xFFFFFFFD
+#define RETURN_UNKNOWN_DISC_TYPE 0xFFFFFFFC
 #define RETURN_OK 0
 #define RETURN_DISC_INFO 1
 #define RETURN_BCA 2
@@ -61,6 +62,22 @@ bool check_buf(char ref_buf[], char *to_check, int *index) {
         }
     }
     return true;
+}
+
+u32 get_end_lba(int disc_type) {
+	switch (disc_type) {
+		case IS_NGC_DISC:
+			return NGC_DISC_SIZE;
+		
+		case IS_DATEL_DISC:
+			return NGC_DISC_SIZE;
+
+		case IS_WII_DISC:
+			return WII_D5_SIZE; // Dual Layer unimplemented for now
+
+		default:
+			return 0;
+	}
 }
 
 bool is_disc_in_drive() {
@@ -277,6 +294,12 @@ int main(int argc, char **argv) {
                     }
 
                     break;
+                case DISC_INFO:
+                    printf("C  Get Disc Info\n");
+
+                    int_to_buf(RETURN_PROTOCOL_ERROR, send_buf, &send_index); // For now
+
+                    break;
                 case DUMP_BCA:
                     printf("C  Dump BCA\n");
 
@@ -286,9 +309,30 @@ int main(int argc, char **argv) {
                         break;
                     }
 
+                    int disc_type = identify_disc();
+
+                    if (disc_type == IS_UNK_DISC) {
+                        printf("R  Unknown Disc Type\n");
+                        int_to_buf(RETURN_UNKNOWN_DISC_TYPE, send_buf, &send_index);
+                        break;
+                    }
+
+                    char bca_data[64] __attribute__((aligned(32)));
+                    DCZeroRange(bca_data, 64);
+                    DCFlushRange(bca_data, 64);
+                    dvd_read_bca(bca_data);
+
+                    int_to_buf(RETURN_BCA, send_buf, &send_index);
+                    memcpy(&send_buf[send_index], &bca_data[0], 64);
+                    send_index += 64;
+
+                    printf("R  Sent BCA\n");
+
                     break;
                 default:
-                    printf("Unknown Command\n");
+                    printf("C  Unknown Command\n");
+
+                    int_to_buf(RETURN_PROTOCOL_ERROR, send_buf, &send_index);
             }
 
             net_send(csock, send_buf, send_index, 0);
