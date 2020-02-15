@@ -4,7 +4,7 @@
 #include <network.h>
 #include <wiiuse/wpad.h>
 
-#define PORT 512
+#define PORT 9875
 
 static void *xfb = NULL;
 static GXRModeObj *rmode = NULL;
@@ -97,6 +97,7 @@ int main(int argc, char **argv) {
     }
 
     // Waits for button input before exiting
+    printf("Press HOME to exit\n");
     while(1) {
         WPAD_ScanPads();
         u32 pressed = WPAD_ButtonsDown(0);
