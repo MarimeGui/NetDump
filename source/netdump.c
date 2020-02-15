@@ -4,7 +4,7 @@
 #include <network.h>
 #include <wiiuse/wpad.h>
 
-#define PORT 25565
+#define PORT 512
 
 static void *xfb = NULL;
 static GXRModeObj *rmode = NULL;
@@ -13,14 +13,14 @@ void *initialize() {
     void *xfb;
     VIDEO_Init();
     WPAD_Init();
-    rmode = VIDEO_GetPreferredMode(MULL);
+    rmode = VIDEO_GetPreferredMode(NULL);
     xfb = MEM_K0_TO_K1(SYS_AllocateFramebuffer(rmode));
     console_init(xfb,20,20,rmode->fbWidth,rmode->xfbHeight,rmode->fbWidth*VI_DISPLAY_PIX_SZ);
     VIDEO_Configure(rmode);
     VIDEO_SetNextFramebuffer(xfb);
     VIDEO_SetBlack(FALSE);
     VIDEO_Flush();
-    VIDEO_WaitForVSync();
+    VIDEO_WaitVSync();
     if(rmode->viTVMode&VI_NON_INTERLACE) VIDEO_WaitVSync();
     return xfb;
 }
@@ -36,7 +36,7 @@ int main(int argc, char **argv) {
     char localip[16] = {0};
     char gateway[16] = {0};
     char netmask[16] = {0};
-    ret = if_config(localip, netmask, gateway, TRUE, 20);
+    s32 ret = if_config(localip, netmask, gateway, TRUE, 20);
     if (ret>=0) {
         printf("successful. %s\n", localip);
 
@@ -62,18 +62,32 @@ int main(int argc, char **argv) {
             ret = net_bind(sock, (struct sockaddr *) &server, sizeof(server));
 
             if (!ret) {
-                while (1) {
-                    csock = net_accept(sock, (struct sockaddr *) &client, &clientlen);
+                if (!(ret = net_listen(sock, 5))) {
+                    while (1) {
+                        csock = net_accept(sock, (struct sockaddr *) &client, &clientlen);
 
-                    if (csock < 0) {
-                        printf("Error connecting socket %d !\n", csock);
-                        while(1);
+                        if (csock < 0) {
+                            printf("Error connecting socket %d !\n", csock);
+                            break;
+                        }
+                        printf("Connecting port %d from %s\n", client.sin_port, inet_ntoa(client.sin_addr));
+                        memset(temp, 0, 1026);
+                        ret = net_recv (csock, temp, 1024, 0);
+                        printf("Received %d bytes\n", ret);
+                        for (int i = 0; i < ret; ++i) {
+                            printf("%02X ", temp[i]);
+                            if (i % 8 == 7) {
+                                printf("\n");
+                            }
+                        }
+                        printf("\n");
                     }
-
-                    
+                } else {
+                    printf("Error %d while listening !", ret);
                 }
+                
             } else {
-                printf("Error %d while listening !\n", ret);
+                printf("Error %d while binding socket !\n", ret);
             }
         } else {
             printf("Failed to open socket.\n");
