@@ -66,6 +66,16 @@ bool is_disc_in_drive() {
     return (val & 2);
 }
 
+void wait_for_button_exit() {
+    printf("Press HOME to exit\n");
+    while(1) {
+        WPAD_ScanPads();
+        u32 pressed = WPAD_ButtonsDown(0);
+        if ( pressed & WPAD_BUTTON_HOME ) exit(0);
+        VIDEO_WaitVSync();
+    }
+}
+
 // Init various things
 void *initialize() {
     void *xfb;
@@ -91,177 +101,185 @@ int main(int argc, char **argv) {
     bool shutdown = false;
 
     printf("Netdump\n");
+    printf("Performing Checks...\n");
+
+    // Code Here
+
     printf("Configuring Network... ");
     
-    // Init Network
     char localip[16] = {0};
     char gateway[16] = {0};
     char netmask[16] = {0};
     s32 ret = if_config(localip, netmask, gateway, TRUE, 20);
 
-    if (ret>=0) {
-        printf("successful. %s\n", localip);
+    if (if_config(localip, netmask, gateway, TRUE, 20) < 0) {
+        printf(" fail.\n");
+        wait_for_button_exit();
+        return 0;
+    }
+    
+    printf("successful. Wii IP: %s\n", localip);
 
-        // Mutable Values
-        int sock, csock;
-        int ret;
-        u32 clientlen;
-        struct sockaddr_in client;
-        struct sockaddr_in server;
-        char recv_buf[1026];
-        char send_buf[1026];
+    // Mutable Values
+    int sock, csock;
+    u32 clientlen;
+    struct sockaddr_in client;
+    struct sockaddr_in server;
+    char recv_buf[1026];
+    char send_buf[1026];
 
-        clientlen = sizeof(client);
+    clientlen = sizeof(client);
 
-        sock = net_socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
+    sock = net_socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
 
-        if (sock != INVALID_SOCKET) {
-            memset(&server, 0, sizeof(server));
-            memset(&client, 0, sizeof(client));
+    if (sock == INVALID_SOCKET) {
+        printf("Failed to open socket.\n");
+        wait_for_button_exit();
+        return 0;
+    }
 
-            server.sin_family = AF_INET;
-            server.sin_port = htons(PORT);
-            server.sin_addr.s_addr = INADDR_ANY;
-            ret = net_bind(sock, (struct sockaddr *) &server, sizeof(server));
+    memset(&server, 0, sizeof(server));
+    memset(&client, 0, sizeof(client));
 
-            if (!ret) {
-                if (!(ret = net_listen(sock, 5))) {
+    server.sin_family = AF_INET;
+    server.sin_port = htons(PORT);
+    server.sin_addr.s_addr = INADDR_ANY;
 
-                    bool program_exit = false;
+    if (net_bind(sock, (struct sockaddr *) &server, sizeof(server))) {
+        printf("Error while binding socket.\n");
+        wait_for_button_exit();
+        return 0;
+    }
 
-                    // New clients loop
-                    while (1) {
-                        csock = net_accept(sock, (struct sockaddr *) &client, &clientlen);
+    if (net_listen(sock, 5)) {
+        printf("Error while listening.\n");
+        wait_for_button_exit();
+        return 0;
+    }
 
-                        if (csock < 0) {
-                            printf("Error connecting socket %d !\n", csock);
-                            continue;
-                        }
+    bool program_exit = false;
 
-                        printf("-> %s\n", inet_ntoa(client.sin_addr));
+    // New clients loop
+    while (1) {
+        csock = net_accept(sock, (struct sockaddr *) &client, &clientlen);
 
-                        bool disconnect = false;
-
-                        // New command loop
-                        while (1) {
-                            memset(recv_buf, 0, 1026);
-                            ret = net_recv(csock, recv_buf, 1024, 0);
-                            int recv_index = 0;
-
-                            memset(send_buf, 0, 1026);
-                            int send_index = 0;
-
-                            buf_to_buf(MAGIC_NUMBER, send_buf, &send_index);
-                            int_to_buf(PROTOCOL_VERSION, send_buf, &send_index);
-
-                            if (ret < 15) {
-                                printf("Packet too small (%d) !\n", ret);
-                                break;
-                            }
-
-                            if (!check_buf(MAGIC_NUMBER, recv_buf, &recv_index)) {
-                                printf("Wrong Magic Number !\n");
-                                break;
-                            }
-
-                            if (buf_to_int(recv_buf, &recv_index) != PROTOCOL_VERSION) {
-                                printf("Protol Version Mismatch !\n");
-                                int_to_buf(RETURN_PROTOCOL_ERROR, send_buf, &send_index);
-                                net_send(csock, send_buf, send_index, 0);
-                                break;
-                            }
-
-                            // Check command
-                            switch (buf_to_int(recv_buf, &recv_index)) {
-                                case DISCONNECT:
-                                    printf("C  Disconnect\n");
-
-                                    int_to_buf(RETURN_OK, send_buf, &send_index);
-
-                                    disconnect = true;
-
-                                    break;
-                                case EXIT_PROGRAM:
-                                    printf("C  Exit Program\n");
-
-                                    int_to_buf(RETURN_OK, send_buf, &send_index);
-
-                                    bypass_home_button = true;
-                                    disconnect = true;
-                                    program_exit = true;
-
-                                    break;
-                                case SHUTDOWN:
-                                    printf("C Shtudown\n");
-
-                                    int_to_buf(RETURN_OK, send_buf, &send_index);
-
-                                    bypass_home_button = true;
-                                    disconnect = true;
-                                    program_exit = true;
-                                    shutdown = true;
-
-                                    break;
-                                case EJECT_DISC:
-                                    printf("C  Eject disc\n");
-
-                                    if (!is_disc_in_drive()) {
-                                        printf("R  No Disc in Drive\n");
-                                        int_to_buf(RETURN_NO_DISC_ERROR, send_buf, &send_index);
-                                        break;
-                                    }
-
-                                    if (DI_Eject() == 0) {
-                                        printf("R  OK\n");
-                                        int_to_buf(RETURN_OK, send_buf, &send_index);
-                                    } else {
-                                        printf("R  Eject Failed\n");
-                                        int_to_buf(RETURN_COULD_NOT_EJECT_ERROR, send_buf, &send_index);
-                                    }
-
-                                    break;
-                                default:
-                                    printf("Unknown Command\n");
-                            }
-
-                            net_send(csock, send_buf, send_index, 0);
-
-                            if (disconnect) {
-                                break;
-                            }
-                        }
-
-                        printf("------------------\n");
-
-                        net_close(csock);
-
-                        if (program_exit) {
-                            net_close(sock);
-                            break;
-                        }
-
-                    }
-                } else {
-                    printf("Error %d while listening !", ret);
-                }
-            } else {
-                printf("Error %d while binding socket !\n", ret);
-            }
-        } else {
-            printf("Failed to open socket.\n");
+        if (csock < 0) {
+            printf("Error connecting to client.\n");
+            continue;
         }
-    } else {
-        printf("failed.\n");
+
+        printf("-> %s\n", inet_ntoa(client.sin_addr));
+
+        bool disconnect = false;
+
+        // New command loop
+        while (1) {
+            memset(recv_buf, 0, 1026);
+            ret = net_recv(csock, recv_buf, 1024, 0);
+            int recv_index = 0;
+
+            memset(send_buf, 0, 1026);
+            int send_index = 0;
+
+            buf_to_buf(MAGIC_NUMBER, send_buf, &send_index);
+            int_to_buf(PROTOCOL_VERSION, send_buf, &send_index);
+
+            if (ret < 15) {
+                printf("Packet too small (%d) !\n", ret);
+                break;
+            }
+
+            if (!check_buf(MAGIC_NUMBER, recv_buf, &recv_index)) {
+                printf("Wrong Magic Number !\n");
+                break;
+            }
+
+            if (buf_to_int(recv_buf, &recv_index) != PROTOCOL_VERSION) {
+                printf("Protol Version Mismatch !\n");
+                int_to_buf(RETURN_PROTOCOL_ERROR, send_buf, &send_index);
+                net_send(csock, send_buf, send_index, 0);
+                break;
+            }
+
+            // Check command
+            switch (buf_to_int(recv_buf, &recv_index)) {
+                case DISCONNECT:
+                    printf("C  Disconnect\n");
+
+                    int_to_buf(RETURN_OK, send_buf, &send_index);
+
+                    disconnect = true;
+
+                    break;
+                case EXIT_PROGRAM:
+                    printf("C  Exit Program\n");
+
+                    int_to_buf(RETURN_OK, send_buf, &send_index);
+
+                    bypass_home_button = true;
+                    disconnect = true;
+                    program_exit = true;
+
+                    break;
+                case SHUTDOWN:
+                    printf("C Shtudown\n");
+
+                    int_to_buf(RETURN_OK, send_buf, &send_index);
+
+                    bypass_home_button = true;
+                    disconnect = true;
+                    program_exit = true;
+                    shutdown = true;
+
+                    break;
+                case EJECT_DISC:
+                    printf("C  Eject disc\n");
+
+                    if (!is_disc_in_drive()) {
+                        printf("R  No Disc in Drive\n");
+                        int_to_buf(RETURN_NO_DISC_ERROR, send_buf, &send_index);
+                        break;
+                    }
+
+                    if (DI_Eject() == 0) {
+                        printf("R  OK\n");
+                        int_to_buf(RETURN_OK, send_buf, &send_index);
+                    } else {
+                        printf("R  Eject Failed\n");
+                        int_to_buf(RETURN_COULD_NOT_EJECT_ERROR, send_buf, &send_index);
+                    }
+
+                    break;
+                case DUMP_BCA:
+                    printf("C  Dump BCA\n");
+
+                    // Code Here
+
+                    break;
+                default:
+                    printf("Unknown Command\n");
+            }
+
+            net_send(csock, send_buf, send_index, 0);
+
+            if (disconnect) {
+                break;
+            }
+        }
+
+        printf("------------------\n");
+
+        net_close(csock);
+
+        if (program_exit) {
+            net_close(sock);
+            break;
+        }
+
     }
 
     if (!bypass_home_button) {
-        printf("Press HOME to exit\n");
-        while(1) {
-            WPAD_ScanPads();
-            u32 pressed = WPAD_ButtonsDown(0);
-            if ( pressed & WPAD_BUTTON_HOME ) exit(0);
-            VIDEO_WaitVSync();
-        }
+        wait_for_button_exit();
     }
 
     if (shutdown) {

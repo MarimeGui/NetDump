@@ -14,7 +14,7 @@
         {
             "name": "Wii",
             "includePath": [
-                "${workspaceFolder}/**",
+                "${workspaceFolder}/include/**",
                 "/opt/devkitpro/libogc/include/**"
             ],
             "defines": [],
