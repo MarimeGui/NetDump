@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <gccore.h>
+#include <malloc.h>
 #include <network.h>
 #include <wiiuse/wpad.h>
 #include <di/di.h>
@@ -35,6 +36,9 @@
 #define YELLOW  "\x1b[33m"
 #define WHITE   "\x1b[39m"
 
+// Max 65472
+#define PACKET_SIZE 32768
+
 static void *xfb = NULL;
 static GXRModeObj *rmode = NULL;
 
@@ -49,6 +53,17 @@ void int_to_buf(int value, char *buf, int *index) {
 // Reads int from buffer
 int buf_to_int(char *buf, int *index) {
     return (buf[(*index)++] << 24) | (buf[(*index)++] << 16) | (buf[(*index)++] << 8) | buf[(*index)++];
+}
+
+void u64_to_buf(u64 value, char *buf, int *index) {
+    buf[(*index)++] = (value & 0xFF00000000000000) >> 56;
+    buf[(*index)++] = (value & 0x00FF000000000000) >> 48;
+    buf[(*index)++] = (value & 0x0000FF0000000000) >> 40;
+    buf[(*index)++] = (value & 0x000000FF00000000) >> 32;
+    buf[(*index)++] = (value & 0x00000000FF000000) >> 24;
+    buf[(*index)++] = (value & 0x0000000000FF0000) >> 16;
+    buf[(*index)++] = (value & 0x000000000000FF00) >> 8;
+    buf[(*index)++] =  value & 0x00000000000000FF;
 }
 
 void buf_to_buf(char in_buf[], char *out_buf, int *index) {
@@ -250,6 +265,8 @@ int main(int argc, char **argv) {
                 break;
             }
 
+            int disc_type;
+
             // Check command
             switch (buf_to_int(recv_buf, &recv_index)) {
                 case DISCONNECT:
@@ -258,6 +275,10 @@ int main(int argc, char **argv) {
                     int_to_buf(RETURN_OK, send_buf, &send_index);
 
                     disconnect = true;
+
+                    if (net_send(csock, send_buf, send_index, 0) < 0) {
+                        printf(RED "Error while sending response\n" WHITE);
+                    }
 
                     break;
                 case EXIT_PROGRAM:
@@ -268,6 +289,10 @@ int main(int argc, char **argv) {
                     bypass_home_button = true;
                     disconnect = true;
                     program_exit = true;
+
+                    if (net_send(csock, send_buf, send_index, 0) < 0) {
+                        printf(RED "Error while sending response\n" WHITE);
+                    }
 
                     break;
                 case SHUTDOWN:
@@ -280,6 +305,10 @@ int main(int argc, char **argv) {
                     program_exit = true;
                     shutdown = true;
 
+                    if (net_send(csock, send_buf, send_index, 0) < 0) {
+                        printf(RED "Error while sending response\n" WHITE);
+                    }
+
                     break;
                 case EJECT_DISC:
                     printf("C  Eject disc\n");
@@ -287,6 +316,9 @@ int main(int argc, char **argv) {
                     if (!is_disc_in_drive()) {
                         printf("R  " YELLOW "No Disc in Drive\n" WHITE);
                         int_to_buf(RETURN_NO_DISC_ERROR, send_buf, &send_index);
+                        if (net_send(csock, send_buf, send_index, 0) < 0) {
+                            printf(RED "Error while sending response\n" WHITE);
+                        }
                         break;
                     }
 
@@ -298,11 +330,19 @@ int main(int argc, char **argv) {
                         int_to_buf(RETURN_COULD_NOT_EJECT_ERROR, send_buf, &send_index);
                     }
 
+                    if (net_send(csock, send_buf, send_index, 0) < 0) {
+                        printf(RED "Error while sending response\n" WHITE);
+                    }
+
                     break;
                 case DISC_INFO:
                     printf("C  Get Disc Info\n");
 
                     int_to_buf(RETURN_PROTOCOL_ERROR, send_buf, &send_index); // For now
+
+                    if (net_send(csock, send_buf, send_index, 0) < 0) {
+                        printf(RED "Error while sending response\n" WHITE);
+                    }
 
                     break;
                 case DUMP_BCA:
@@ -311,14 +351,20 @@ int main(int argc, char **argv) {
                     if (init_dvd() == NO_DISC) {
                         printf("R  " YELLOW "No Disc in Drive\n" WHITE);
                         int_to_buf(RETURN_NO_DISC_ERROR, send_buf, &send_index);
+                        if (net_send(csock, send_buf, send_index, 0) < 0) {
+                            printf(RED "Error while sending response\n" WHITE);
+                        }
                         break;
                     }
 
-                    int disc_type = identify_disc();
+                    disc_type = identify_disc();
 
                     if (disc_type == IS_UNK_DISC) {
                         printf("R  " YELLOW "Unknown Disc Type\n" WHITE);
                         int_to_buf(RETURN_UNKNOWN_DISC_TYPE, send_buf, &send_index);
+                        if (net_send(csock, send_buf, send_index, 0) < 0) {
+                            printf(RED "Error while sending response\n" WHITE);
+                        }
                         break;
                     }
 
@@ -333,14 +379,99 @@ int main(int argc, char **argv) {
 
                     printf("R  " GREEN "Sent BCA\n" WHITE);
 
+                    if (net_send(csock, send_buf, send_index, 0) < 0) {
+                        printf(RED "Error while sending response\n" WHITE);
+                    }
+
+                    break;
+                case DUMP_GAME:
+                    printf("C  Dump Game\n");
+
+                    if (init_dvd() == NO_DISC) {
+                        printf("R  " YELLOW "No Disc in Drive\n" WHITE);
+                        int_to_buf(RETURN_NO_DISC_ERROR, send_buf, &send_index);
+                        if (net_send(csock, send_buf, send_index, 0) < 0) {
+                            printf(RED "Error while sending response\n" WHITE);
+                        }
+                        break;
+                    }
+
+                    disc_type = identify_disc();
+
+                    if (disc_type == IS_UNK_DISC) {
+                        printf("R  " YELLOW "Unknown Disc Type\n" WHITE);
+                        int_to_buf(RETURN_UNKNOWN_DISC_TYPE, send_buf, &send_index);
+                        if (net_send(csock, send_buf, send_index, 0) < 0) {
+                            printf(RED "Error while sending response\n" WHITE);
+                        }
+                        break;
+                    }
+
+                    // Send first part, including Headers and Disc Size in bytes
+                    int_to_buf(RETURN_GAME, send_buf, &send_index);
+                    u64_to_buf(((u64)get_end_lba(disc_type)) << 11, send_buf, &send_index);
+
+                    if (net_send(csock, send_buf, send_index, 0) < 0) {
+                        printf(RED "Error while sending response\n" WHITE);
+                    }
+
+                    u32 opt_read_size = READ_SIZE;
+
+                    u32 start_lba = 0;
+                    u32 end_lba = get_end_lba(disc_type);
+
+                    char *disc_buffer = memalign(32, READ_SIZE);
+
+                    u32 in_buffer = 0;
+                    u32 buffer_at = 0;
+
+                    bool stop_now = false;
+
+                    while (start_lba < end_lba) {
+                        opt_read_size = (start_lba + (opt_read_size>>11)) <= end_lba ? opt_read_size : ((u32)((end_lba-start_lba)<<11));
+                        if (DVD_LowRead64(disc_buffer, (u32)opt_read_size, (u64)start_lba << 11)) {
+                            printf(RED "   Error while reading disc.\n" WHITE);
+                            break; // Needs better handling
+                        }
+                        start_lba += opt_read_size >> 11;
+                        in_buffer = opt_read_size;
+                        buffer_at = 0;
+                        while (in_buffer > 0) {
+                            if (in_buffer > PACKET_SIZE) {
+                                if (net_send(csock, &disc_buffer[buffer_at], PACKET_SIZE, 0) < 0) {
+                                    printf(RED "Error while sending data\n" WHITE);
+                                    stop_now = true;
+                                    break;
+                                }
+                                buffer_at += PACKET_SIZE;
+                                in_buffer -= PACKET_SIZE;
+                            } else {
+                                if (net_send(csock, &disc_buffer[buffer_at], in_buffer, 0) < 0) {
+                                    printf(RED "Error while sending data\n" WHITE);
+                                    stop_now = true;
+                                    break;
+                                }
+                                buffer_at += in_buffer;
+                                in_buffer = 0;
+                            }
+                        }
+                        if (stop_now) {
+                            break;
+                        }
+                    }
+
+                    printf("R  " GREEN "Sent BCA\n" WHITE);
+
                     break;
                 default:
                     printf("C  " YELLOW "Unknown Command\n" WHITE);
 
                     int_to_buf(RETURN_PROTOCOL_ERROR, send_buf, &send_index);
-            }
 
-            net_send(csock, send_buf, send_index, 0);
+                    if (net_send(csock, send_buf, send_index, 0) < 0) {
+                        printf(RED "Error while sending response\n" WHITE);
+                    }
+            }
 
             if (disconnect) {
                 break;
