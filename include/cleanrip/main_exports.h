@@ -29,3 +29,5 @@ enum discTypes
 int have_ahbprot();
 int find_ios(u32 ios);
 int identify_disc();
+void get_game_name(char *out_buf, int *index);
+void get_internal_name(char *out_buf, int *index);

@@ -87,3 +87,21 @@ int identify_disc() {
         return IS_UNK_DISC;
     }
 }
+
+void get_game_name(char *out_buf, int *index) {
+    int other_index = 0;
+    while (other_index < 32) {
+        out_buf[*index] = gameName[other_index];
+        (*index)++;
+        other_index++;
+    }
+}
+
+void get_internal_name(char *out_buf, int *index) {
+    int other_index = 0;
+    while (other_index < 512) {
+        out_buf[*index] = internalName[other_index];
+        (*index)++;
+        other_index++;
+    }
+}

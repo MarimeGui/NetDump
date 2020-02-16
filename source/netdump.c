@@ -31,6 +31,10 @@
 #define RETURN_BCA 2
 #define RETURN_GAME 3
 
+#define GC_DISC 0
+#define WII_SINGLE_SIDED_DISC 1
+#define WII_DOUBLE_SIDED_DISC 2
+
 #define RED     "\x1b[31m"
 #define GREEN   "\x1b[32m"
 #define YELLOW  "\x1b[33m"
@@ -336,9 +340,40 @@ int main(int argc, char **argv) {
 
                     break;
                 case DISC_INFO:
-                    printf("C  Get Disc Info\n");
+                    printf("C  Disc Info\n");
 
-                    int_to_buf(RETURN_PROTOCOL_ERROR, send_buf, &send_index); // For now
+                    if (init_dvd() == NO_DISC) {
+                        printf("R  " YELLOW "No Disc in Drive\n" WHITE);
+                        int_to_buf(RETURN_NO_DISC_ERROR, send_buf, &send_index);
+                        if (net_send(csock, send_buf, send_index, 0) < 0) {
+                            printf(RED "Error while sending response\n" WHITE);
+                        }
+                        break;
+                    }
+
+                    disc_type = identify_disc();
+
+                    if (disc_type == IS_UNK_DISC) {
+                        printf("R  " YELLOW "Unknown Disc Type\n" WHITE);
+                        int_to_buf(RETURN_UNKNOWN_DISC_TYPE, send_buf, &send_index);
+                        if (net_send(csock, send_buf, send_index, 0) < 0) {
+                            printf(RED "Error while sending response\n" WHITE);
+                        }
+                        break;
+                    }
+
+                    int_to_buf(RETURN_DISC_INFO, send_buf, &send_index);
+
+                    if (disc_type == IS_NGC_DISC) {
+                        send_buf[send_index++] = GC_DISC;
+                    } else if(disc_type == IS_WII_DISC) {
+                        send_buf[send_index++] = WII_SINGLE_SIDED_DISC;
+                    }
+
+                    get_game_name(send_buf, &send_index);
+                    get_internal_name(send_buf, &send_index);
+
+                    printf("R  " GREEN "Sent Disc Info\n" WHITE);
 
                     if (net_send(csock, send_buf, send_index, 0) < 0) {
                         printf(RED "Error while sending response\n" WHITE);
